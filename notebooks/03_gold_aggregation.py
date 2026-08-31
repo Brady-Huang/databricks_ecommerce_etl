@@ -14,10 +14,10 @@ catalog = dbutils.widgets.get("catalog")
 
 from pyspark.sql import functions as F
 
-orders = spark.table(f"{catalog}.silver.orders").filter("status = 'completed'")
+orders = spark.table(f"{catalog}.silver.orders").filter("status = 'completed' AND is_current = true")
 order_items = spark.table(f"{catalog}.silver.order_items")
 customers = spark.table(f"{catalog}.silver.customers")
-products = spark.table(f"{catalog}.silver.products")
+products = spark.table(f"{catalog}.silver.products").filter("is_current = true")
 web_events = spark.table(f"{catalog}.silver.web_events")
 
 # COMMAND ----------

@@ -130,8 +130,9 @@ random.shuffle(events)
 batch_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 out_path = f"{cdc_landing_path}/batch_{batch_ts}"
 
-rdd = spark.sparkContext.parallelize([json.dumps(e) for e in events])
-rdd.coalesce(1).saveAsTextFile(out_path)
+json_lines = [json.dumps(e) for e in events]
+df_out = spark.createDataFrame([(line,) for line in json_lines], ["value"])
+df_out.coalesce(1).write.mode("overwrite").text(out_path)
 
 print(f"[OK] 產生 {len(events)} 筆模擬 CDC 事件 -> {out_path}")
 print("op 分佈:", {op: sum(1 for e in events if e["op"] == op) for op in ["c", "u", "d"]})

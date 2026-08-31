@@ -30,6 +30,31 @@ from delta.tables import DeltaTable
 
 # COMMAND ----------
 
+from pyspark.sql.types import StructType, StructField, StringType, LongType, BooleanType
+
+# 手動定義 schema，避免 Spark 因為 before/after 欄位數量不一致而誤判
+customer_schema = StructType([
+    StructField("customer_id", StringType(), True),
+    StructField("first_name", StringType(), True),
+    StructField("last_name", StringType(), True),
+    StructField("email", StringType(), True),
+    StructField("city", StringType(), True),
+    StructField("signup_date", StringType(), True),
+    StructField("is_member", BooleanType(), True),
+    StructField("age", LongType(), True),
+])
+
+cdc_event_schema = StructType([
+    StructField("op", StringType(), True),
+    StructField("before", customer_schema, True),
+    StructField("after", customer_schema, True),
+    StructField("source", StructType([
+        StructField("table", StringType(), True),
+        StructField("lsn", LongType(), True),
+        StructField("ts_ms", LongType(), True),
+    ]), True),
+])
+
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {catalog}.bronze.customers_cdc_log (
     op STRING,
@@ -46,7 +71,8 @@ CREATE TABLE IF NOT EXISTS {catalog}.bronze.customers_cdc_log (
 raw_cdc = (spark.readStream
            .format("cloudFiles")
            .option("cloudFiles.format", "json")
-           .option("cloudFiles.schemaLocation", f"{checkpoint_path}/_schema")
+           .schema(cdc_event_schema)
+           .option("recursiveFileLookup", "true")
            .load(cdc_landing_path))
 
 bronze_cdc = (raw_cdc
@@ -58,7 +84,7 @@ bronze_cdc = (raw_cdc
                   F.col("source.lsn").alias("lsn"),
                   F.col("source.ts_ms").alias("ts_ms"),
               )
-              .withColumn("_source_file", F.input_file_name())
+              .withColumn("_source_file", F.col("_metadata.file_path"))
               .withColumn("_ingest_ts", F.current_timestamp()))
 
 query = (bronze_cdc.writeStream

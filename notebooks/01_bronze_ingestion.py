@@ -28,7 +28,7 @@ def ingest_to_bronze(table_name: str):
     target_table = f"{catalog}.bronze.{table_name}"
     schema_location = f"{checkpoint_path}/{table_name}/_schema"
     checkpoint_location = f"{checkpoint_path}/{table_name}/_checkpoint"
-
+      
     df = (spark.readStream
           .format("cloudFiles")
           .option("cloudFiles.format", "csv")
@@ -36,7 +36,7 @@ def ingest_to_bronze(table_name: str):
           .option("cloudFiles.inferColumnTypes", "true")
           .option("header", "true")
           .load(source_path)
-          .withColumn("_source_file", F.input_file_name())
+          .withColumn("_source_file", F.col("_metadata.file_path"))
           .withColumn("_ingest_ts", F.current_timestamp()))
 
     query = (df.writeStream

@@ -1,0 +1,64 @@
+{
+  "name": "ecommerce_initial_snapshot",
+  "tags": {
+    "project": "ecommerce_etl_demo",
+    "stage": "initial_load"
+  },
+  "job_clusters": [],
+  "tasks": [
+    {
+      "task_key": "bronze_ingestion",
+      "notebook_task": {
+        "notebook_path": "/Workspace/ecommerce_etl/notebooks/01_bronze_ingestion",
+        "base_parameters": {
+          "catalog": "{{job.parameters.catalog}}",
+          "landing_volume_path": "{{job.parameters.landing_volume_path}}",
+          "checkpoint_path": "{{job.parameters.checkpoint_path}}"
+        }
+      },
+      "environment_key": "serverless_env"
+    },
+    {
+      "task_key": "silver_transformation",
+      "depends_on": [{ "task_key": "bronze_ingestion" }],
+      "notebook_task": {
+        "notebook_path": "/Workspace/ecommerce_etl/notebooks/02_silver_transformation",
+        "base_parameters": {
+          "catalog": "{{job.parameters.catalog}}"
+        }
+      },
+      "environment_key": "serverless_env"
+    },
+    {
+      "task_key": "gold_aggregation",
+      "depends_on": [{ "task_key": "silver_transformation" }],
+      "notebook_task": {
+        "notebook_path": "/Workspace/ecommerce_etl/notebooks/03_gold_aggregation",
+        "base_parameters": {
+          "catalog": "{{job.parameters.catalog}}"
+        }
+      },
+      "environment_key": "serverless_env"
+    }
+  ],
+  "environments": [
+    {
+      "environment_key": "serverless_env",
+      "spec": {
+        "client": "1"
+      }
+    }
+  ],
+  "parameters": [
+    { "name": "catalog", "default": "ecommerce_demo" },
+    { "name": "landing_volume_path", "default": "/Volumes/ecommerce_demo/raw/landing" },
+    { "name": "checkpoint_path", "default": "/Volumes/ecommerce_demo/raw/_checkpoints" }
+  ],
+  "schedule": {
+    "quartz_cron_expression": "0 0 2 1 1 ? 2099",
+    "timezone_id": "Asia/Taipei",
+    "pause_status": "PAUSED"
+  },
+  "max_concurrent_runs": 1,
+  "description": "一次性的批次歷史回填(Initial Snapshot)。只在環境初始化或需要重建資料時手動觸發，不應設定為固定排程。schedule 欄位刻意設成 PAUSED 且日期設在遙遠未來，僅為了滿足 Databricks Job 需要 schedule 欄位的格式要求，實際執行方式是手動點擊 Run now。"
+}

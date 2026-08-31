@@ -1,0 +1,57 @@
+{
+  "name": "ecommerce_daily_gold_refresh",
+  "tags": {
+    "project": "ecommerce_etl_demo",
+    "stage": "gold"
+  },
+  "job_clusters": [],
+  "tasks": [
+    {
+      "task_key": "gold_aggregation",
+      "notebook_task": {
+        "notebook_path": "/Workspace/ecommerce_etl/notebooks/03_gold_aggregation",
+        "base_parameters": {
+          "catalog": "{{job.parameters.catalog}}"
+        }
+      },
+      "environment_key": "serverless_env"
+    },
+    {
+      "task_key": "churn_feature_table",
+      "depends_on": [{ "task_key": "gold_aggregation" }],
+      "notebook_task": {
+        "notebook_path": "/Workspace/ecommerce_etl/notebooks/06_churn_feature_table",
+        "base_parameters": {
+          "catalog": "{{job.parameters.catalog}}",
+          "observation_date": "{{job.parameters.observation_date}}",
+          "churn_window_days": "{{job.parameters.churn_window_days}}",
+          "min_tenure_days": "{{job.parameters.min_tenure_days}}",
+          "lookback_days": "{{job.parameters.lookback_days}}"
+        }
+      },
+      "environment_key": "serverless_env"
+    }
+  ],
+  "environments": [
+    {
+      "environment_key": "serverless_env",
+      "spec": {
+        "client": "1"
+      }
+    }
+  ],
+  "parameters": [
+    { "name": "catalog", "default": "ecommerce_demo" },
+    { "name": "observation_date", "default": "2026-05-01" },
+    { "name": "churn_window_days", "default": "90" },
+    { "name": "min_tenure_days", "default": "30" },
+    { "name": "lookback_days", "default": "180" }
+  ],
+  "schedule": {
+    "quartz_cron_expression": "0 0 2 * * ?",
+    "timezone_id": "Asia/Taipei",
+    "pause_status": "UNPAUSED"
+  },
+  "max_concurrent_runs": 1,
+  "description": "每日固定重算 Gold 層彙總表與流失特徵表，跟批次頻率脫鉤，跟 CDC(每15分鐘) 分開排程，避免每次 CDC 觸發都重算成本較高的 Gold 聚合，符合 freshness vs cost 的取捨。"
+}

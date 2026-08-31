@@ -66,6 +66,7 @@ silver_customers_df = (
 
 print(f"[OK] Silver customers merged: {silver_customers_df.count()} incoming rows")
 
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -75,12 +76,16 @@ print(f"[OK] Silver customers merged: {silver_customers_df.count()} incoming row
 
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {catalog}.silver.products (
+    product_sk STRING NOT NULL,
     product_id STRING NOT NULL,
     product_name STRING,
     category STRING,
     cost DECIMAL(10,2),
     list_price DECIMAL(10,2),
     is_active BOOLEAN,
+    valid_from TIMESTAMP,
+    valid_to TIMESTAMP,
+    is_current BOOLEAN,
     _updated_ts TIMESTAMP
 ) USING DELTA
 """)
@@ -88,19 +93,24 @@ CREATE TABLE IF NOT EXISTS {catalog}.silver.products (
 silver_products_df = (
     spark.table(f"{catalog}.bronze.products")
     .dropDuplicates(["product_id"])
+    .withColumn("product_sk", F.expr("uuid()"))
     .withColumn("cost", F.col("cost").cast("decimal(10,2)"))
     .withColumn("list_price", F.col("list_price").cast("decimal(10,2)"))
+    .withColumn("valid_from", F.col("_ingest_ts"))
+    .withColumn("valid_to", F.lit("9999-12-31 00:00:00").cast("timestamp"))
+    .withColumn("is_current", F.lit(True))
     .withColumn("_updated_ts", F.current_timestamp())
-    .select("product_id", "product_name", "category", "cost", "list_price", "is_active", "_updated_ts")
+    .select("product_sk", "product_id", "product_name", "category", "cost",
+            "list_price", "is_active", "valid_from", "valid_to", "is_current", "_updated_ts")
 )
-
 (DeltaTable.forName(spark, f"{catalog}.silver.products").alias("t")
- .merge(silver_products_df.alias("s"), "t.product_id = s.product_id")
- .whenMatchedUpdateAll()
+ .merge(silver_products_df.alias("s"),
+        "t.product_id = s.product_id AND t.is_current = true")
  .whenNotMatchedInsertAll()
  .execute())
 
-print(f"[OK] Silver products merged: {silver_products_df.count()} rows")
+current_count = spark.table(f"{catalog}.silver.products").filter("is_current = true").count()
+print(f"[OK] Silver products baseline established. Current active versions: {current_count}")
 
 # COMMAND ----------
 
@@ -114,6 +124,7 @@ print(f"[OK] Silver products merged: {silver_products_df.count()} rows")
 
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {catalog}.silver.orders (
+    order_sk STRING NOT NULL,
     order_id STRING NOT NULL,
     customer_id STRING,
     order_date TIMESTAMP,
@@ -121,6 +132,9 @@ CREATE TABLE IF NOT EXISTS {catalog}.silver.orders (
     payment_method STRING,
     order_total DECIMAL(12,2),
     is_valid_customer BOOLEAN,
+    valid_from TIMESTAMP,
+    valid_to TIMESTAMP,
+    is_current BOOLEAN,
     _updated_ts TIMESTAMP
 ) USING DELTA
 """)
@@ -141,17 +155,21 @@ silver_orders_df = (
     bronze_orders
     .join(valid_customer_ids.withColumnRenamed("customer_id", "_valid_cid"),
           bronze_orders.customer_id == F.col("_valid_cid"), "left")
+    .withColumn("order_sk", F.expr("uuid()"))
     .withColumn("is_valid_customer", F.col("_valid_cid").isNotNull())
     .withColumn("order_date", F.to_timestamp("order_date"))
     .withColumn("order_total", F.col("order_total").cast("decimal(12,2)"))
+    .withColumn("valid_from", F.col("_ingest_ts"))
+    .withColumn("valid_to", F.lit("9999-12-31 00:00:00").cast("timestamp"))
+    .withColumn("is_current", F.lit(True))
     .withColumn("_updated_ts", F.current_timestamp())
-    .select("order_id", "customer_id", "order_date", "status", "payment_method",
-            "order_total", "is_valid_customer", "_updated_ts")
+    .select("order_sk", "order_id", "customer_id", "order_date", "status", "payment_method",
+            "order_total", "is_valid_customer", "valid_from", "valid_to", "is_current", "_updated_ts")
 )
 
 (DeltaTable.forName(spark, f"{catalog}.silver.orders").alias("t")
- .merge(silver_orders_df.alias("s"), "t.order_id = s.order_id")
- .whenMatchedUpdateAll()
+ .merge(silver_orders_df.alias("s"),
+        "t.order_id = s.order_id AND t.is_current = true")
  .whenNotMatchedInsertAll()
  .execute())
 
@@ -162,7 +180,8 @@ spark.createDataFrame(
 ).withColumn("checked_ts", F.current_timestamp()) \
  .write.mode("append").saveAsTable(f"{catalog}.silver.dq_log")
 
-print(f"[OK] Silver orders merged. Invalid customer_id count: {invalid_count}")
+current_count = spark.table(f"{catalog}.silver.orders").filter("is_current = true").count()
+print(f"[OK] Silver orders baseline established. Current active versions: {current_count}. Invalid customer_id count: {invalid_count}")
 
 # COMMAND ----------
 
