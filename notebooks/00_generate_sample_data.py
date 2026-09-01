@@ -53,6 +53,8 @@ spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.bronze")
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.silver")
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.gold")
 spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.raw.landing")
+spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.raw.cdc_landing")
+spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.raw._checkpoints")
 
 dbutils.fs.mkdirs(f"{landing_path}/customers")
 dbutils.fs.mkdirs(f"{landing_path}/products")

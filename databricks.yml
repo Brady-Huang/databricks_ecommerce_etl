@@ -1,0 +1,256 @@
+bundle:
+  name: databricks_ecommerce_etl
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-baccf585-cde2.cloud.databricks.com
+
+resources:
+  jobs:
+    job_a_initial_snapshot:
+      name: ecommerce_initial_snapshot
+      tags:
+        project: ecommerce_etl_demo
+        stage: initial_load
+      tasks:
+        - task_key: generate_sample_data
+          notebook_task:
+            notebook_path: ./notebooks/00_generate_sample_data.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              landing_volume_path: "{{job.parameters.landing_volume_path}}"
+              num_customers: "{{job.parameters.num_customers}}"
+              num_products: "{{job.parameters.num_products}}"
+              num_orders: "{{job.parameters.num_orders}}"
+              num_web_events: "{{job.parameters.num_web_events}}"
+              inject_dirty_data: "{{job.parameters.inject_dirty_data}}"
+          environment_key: serverless_env
+        - task_key: bronze_ingestion
+
+          depends_on:
+            - task_key: generate_sample_data
+          notebook_task:
+            notebook_path: ./notebooks/01_bronze_ingestion.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              landing_volume_path: "{{job.parameters.landing_volume_path}}"
+              checkpoint_path: "{{job.parameters.checkpoint_path}}"
+          environment_key: serverless_env
+        - task_key: silver_transformation
+          depends_on:
+            - task_key: bronze_ingestion
+          notebook_task:
+            notebook_path: ./notebooks/02_silver_transformation.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+          environment_key: serverless_env
+        - task_key: gold_aggregation
+          depends_on:
+            - task_key: silver_transformation
+          notebook_task:
+            notebook_path: ./notebooks/03_gold_aggregation.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+          environment_key: serverless_env
+      environments:
+        - environment_key: serverless_env
+          spec:
+            client: "3"
+      parameters:
+        - name: catalog
+          default: ecommerce_demo
+
+        - name: landing_volume_path
+          default: /Volumes/ecommerce_demo/raw/landing
+        - name: checkpoint_path
+          default: /Volumes/ecommerce_demo/raw/_checkpoints
+        - name: num_customers
+          default: "5000"
+        - name: num_products
+          default: "500"
+        - name: num_orders
+          default: "20000"
+        - name: num_web_events
+          default: "80000"
+        - name: inject_dirty_data
+          default: "true"
+      schedule:
+        quartz_cron_expression: "0 0 2 1 1 ? 2099"
+        timezone_id: Asia/Taipei
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+      description: >
+        一次性的批次歷史回填(Initial Snapshot)。包含資料生成(00)、Bronze/Silver/Gold 全流程。
+        只在環境初始化或需要重建資料時手動觸發，不應設定為固定排程。
+
+    job_b_cdc_incremental:
+      name: ecommerce_cdc_incremental
+      tags:
+        project: ecommerce_etl_demo
+        stage: cdc
+      tasks:
+        - task_key: customers_cdc_simulator
+          notebook_task:
+            notebook_path: ./notebooks/04_customers_cdc_simulator.py
+
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              cdc_landing_path: "{{job.parameters.cdc_landing_customers_path}}"
+              num_change_events: "{{job.parameters.num_change_customers_events}}"
+          environment_key: serverless_env
+        - task_key: customers_cdc_apply
+          depends_on:
+            - task_key: customers_cdc_simulator
+          notebook_task:
+            notebook_path: ./notebooks/05_customers_cdc_apply.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              cdc_landing_path: "{{job.parameters.cdc_landing_customers_path}}"
+              checkpoint_path: "{{job.parameters.checkpoint_customers_path}}"
+          environment_key: serverless_env
+        - task_key: orders_cdc_simulator
+          notebook_task:
+            notebook_path: ./notebooks/04_orders_cdc_simulator.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              cdc_landing_orders_path: "{{job.parameters.cdc_landing_orders_path}}"
+              num_change_events: "{{job.parameters.num_change_orders_events}}"
+          environment_key: serverless_env
+        - task_key: orders_cdc_apply
+          depends_on:
+            - task_key: orders_cdc_simulator
+          notebook_task:
+            notebook_path: ./notebooks/05_orders_cdc_apply.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              cdc_landing_orders_path: "{{job.parameters.cdc_landing_orders_path}}"
+              checkpoint_orders_path: "{{job.parameters.checkpoint_orders_path}}"
+
+          environment_key: serverless_env
+        - task_key: products_cdc_simulator
+          notebook_task:
+            notebook_path: ./notebooks/04_products_cdc_simulator.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              cdc_landing_products_path: "{{job.parameters.cdc_landing_products_path}}"
+              num_change_events: "{{job.parameters.num_change_products_events}}"
+          environment_key: serverless_env
+        - task_key: products_cdc_apply
+          depends_on:
+            - task_key: products_cdc_simulator
+          notebook_task:
+            notebook_path: ./notebooks/05_products_cdc_apply.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              cdc_landing_products_path: "{{job.parameters.cdc_landing_products_path}}"
+              checkpoint_products_path: "{{job.parameters.checkpoint_products_path}}"
+          environment_key: serverless_env
+        - task_key: order_items_adjustment_simulator
+          notebook_task:
+            notebook_path: ./notebooks/04_order_items_adjustment_simulator.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              cdc_landing_order_items_path: "{{job.parameters.cdc_landing_order_items_path}}"
+              num_change_order_items_events: "{{job.parameters.num_change_order_items_events}}"
+          environment_key: serverless_env
+        - task_key: order_items_adjustment_apply
+          depends_on:
+            - task_key: order_items_adjustment_simulator
+          notebook_task:
+            notebook_path: ./notebooks/05_order_items_adjustment_apply.py
+
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              cdc_landing_order_items_path: "{{job.parameters.cdc_landing_order_items_path}}"
+              checkpoint_order_items_path: "{{job.parameters.checkpoint_order_items_path}}"
+          environment_key: serverless_env
+      environments:
+        - environment_key: serverless_env
+          spec:
+            client: "3"
+      parameters:
+        - name: catalog
+          default: ecommerce_demo
+        - name: cdc_landing_customers_path
+          default: /Volumes/ecommerce_demo/raw/cdc_landing/customers
+        - name: checkpoint_customers_path
+          default: /Volumes/ecommerce_demo/raw/_checkpoints/cdc_customers
+        - name: num_change_customers_events
+          default: "300"
+        - name: cdc_landing_orders_path
+          default: /Volumes/ecommerce_demo/raw/cdc_landing/orders
+        - name: checkpoint_orders_path
+          default: /Volumes/ecommerce_demo/raw/_checkpoints/cdc_orders
+        - name: num_change_orders_events
+          default: "300"
+        - name: cdc_landing_products_path
+          default: /Volumes/ecommerce_demo/raw/cdc_landing/products
+        - name: checkpoint_products_path
+          default: /Volumes/ecommerce_demo/raw/_checkpoints/cdc_products
+        - name: num_change_products_events
+          default: "150"
+        - name: cdc_landing_order_items_path
+          default: /Volumes/ecommerce_demo/raw/cdc_landing/order_items
+
+        - name: checkpoint_order_items_path
+          default: /Volumes/ecommerce_demo/raw/_checkpoints/order_items_adjustments
+        - name: num_change_order_items_events
+          default: "150"
+      schedule:
+        quartz_cron_expression: "0 */15 * * * ?"
+        timezone_id: Asia/Taipei
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+      description: >
+        CDC 增量同步 Job，每 15 分鐘觸發一次。正式使用前建議保持 PAUSED，測試完再手動打開排程。
+
+    job_c_daily_gold_refresh:
+      name: ecommerce_daily_gold_refresh
+      tags:
+        project: ecommerce_etl_demo
+        stage: gold
+      tasks:
+        - task_key: gold_aggregation
+          notebook_task:
+            notebook_path: ./notebooks/03_gold_aggregation.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+          environment_key: serverless_env
+        - task_key: churn_feature_table
+          depends_on:
+            - task_key: gold_aggregation
+          notebook_task:
+            notebook_path: ./notebooks/06_churn_feature_table.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              observation_date: "{{job.parameters.observation_date}}"
+
+              churn_window_days: "{{job.parameters.churn_window_days}}"
+              min_tenure_days: "{{job.parameters.min_tenure_days}}"
+              lookback_days: "{{job.parameters.lookback_days}}"
+          environment_key: serverless_env
+      environments:
+        - environment_key: serverless_env
+          spec:
+            client: "3"
+      parameters:
+        - name: catalog
+          default: ecommerce_demo
+        - name: observation_date
+          default: "2026-05-01"
+        - name: churn_window_days
+          default: "90"
+        - name: min_tenure_days
+          default: "30"
+        - name: lookback_days
+          default: "180"
+      schedule:
+        quartz_cron_expression: "0 0 2 * * ?"
+        timezone_id: Asia/Taipei
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+      description: >
+        每日固定重算 Gold 層彙總表與流失特徵表。正式使用前建議保持 PAUSED，測試完再手動打開排程。
