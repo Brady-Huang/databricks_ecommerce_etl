@@ -9,7 +9,7 @@
     {
       "task_key": "gold_aggregation",
       "notebook_task": {
-        "notebook_path": "/Workspace/ecommerce_etl/notebooks/03_gold_aggregation",
+        "notebook_path": "/Workspace/Users/brady120915@gmail.com/databricks_ecommerce_etl_v2/notebooks/03_gold_aggregation",
         "base_parameters": {
           "catalog": "{{job.parameters.catalog}}"
         }
@@ -20,7 +20,7 @@
       "task_key": "churn_feature_table",
       "depends_on": [{ "task_key": "gold_aggregation" }],
       "notebook_task": {
-        "notebook_path": "/Workspace/ecommerce_etl/notebooks/06_churn_feature_table",
+        "notebook_path": "/Workspace/Users/brady120915@gmail.com/databricks_ecommerce_etl_v2/notebooks/06_churn_feature_table",
         "base_parameters": {
           "catalog": "{{job.parameters.catalog}}",
           "observation_date": "{{job.parameters.observation_date}}",
@@ -36,7 +36,7 @@
     {
       "environment_key": "serverless_env",
       "spec": {
-        "client": "1"
+        "client": "3"
       }
     }
   ],

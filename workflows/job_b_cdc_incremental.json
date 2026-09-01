@@ -9,7 +9,7 @@
     {
       "task_key": "customers_cdc_simulator",
       "notebook_task": {
-        "notebook_path": "/Workspace/ecommerce_etl/notebooks/04_customers_cdc_simulator",
+        "notebook_path": "/Workspace/Users/brady120915@gmail.com/databricks_ecommerce_etl_v2/notebooks/04_customers_cdc_simulator",
         "base_parameters": {
           "catalog": "{{job.parameters.catalog}}",
           "cdc_landing_path": "{{job.parameters.cdc_landing_customers_path}}",
@@ -22,7 +22,7 @@
       "task_key": "customers_cdc_apply",
       "depends_on": [{ "task_key": "customers_cdc_simulator" }],
       "notebook_task": {
-        "notebook_path": "/Workspace/ecommerce_etl/notebooks/05_customers_cdc_apply",
+        "notebook_path": "/Workspace/Users/brady120915@gmail.com/databricks_ecommerce_etl_v2/notebooks/05_customers_cdc_apply",
         "base_parameters": {
           "catalog": "{{job.parameters.catalog}}",
           "cdc_landing_path": "{{job.parameters.cdc_landing_customers_path}}",
@@ -34,7 +34,7 @@
     {
       "task_key": "orders_cdc_simulator",
       "notebook_task": {
-        "notebook_path": "/Workspace/ecommerce_etl/notebooks/04_orders_cdc_simulator",
+        "notebook_path": "/Workspace/Users/brady120915@gmail.com/databricks_ecommerce_etl_v2/notebooks/04_orders_cdc_simulator",
         "base_parameters": {
           "catalog": "{{job.parameters.catalog}}",
           "cdc_landing_orders_path": "{{job.parameters.cdc_landing_orders_path}}",
@@ -47,7 +47,7 @@
       "task_key": "orders_cdc_apply",
       "depends_on": [{ "task_key": "orders_cdc_simulator" }],
       "notebook_task": {
-        "notebook_path": "/Workspace/ecommerce_etl/notebooks/05_orders_cdc_apply",
+        "notebook_path": "/Workspace/Users/brady120915@gmail.com/databricks_ecommerce_etl_v2/notebooks/05_orders_cdc_apply",
         "base_parameters": {
           "catalog": "{{job.parameters.catalog}}",
           "cdc_landing_orders_path": "{{job.parameters.cdc_landing_orders_path}}",
@@ -59,7 +59,7 @@
     {
       "task_key": "products_cdc_simulator",
       "notebook_task": {
-        "notebook_path": "/Workspace/ecommerce_etl/notebooks/04_products_cdc_simulator",
+        "notebook_path": "/Workspace/Users/brady120915@gmail.com/databricks_ecommerce_etl_v2/notebooks/04_products_cdc_simulator",
         "base_parameters": {
           "catalog": "{{job.parameters.catalog}}",
           "cdc_landing_products_path": "{{job.parameters.cdc_landing_products_path}}",
@@ -72,7 +72,7 @@
       "task_key": "products_cdc_apply",
       "depends_on": [{ "task_key": "products_cdc_simulator" }],
       "notebook_task": {
-        "notebook_path": "/Workspace/ecommerce_etl/notebooks/05_products_cdc_apply",
+        "notebook_path": "/Workspace/Users/brady120915@gmail.com/databricks_ecommerce_etl_v2/notebooks/05_products_cdc_apply",
         "base_parameters": {
           "catalog": "{{job.parameters.catalog}}",
           "cdc_landing_products_path": "{{job.parameters.cdc_landing_products_path}}",
@@ -84,7 +84,7 @@
     {
       "task_key": "order_items_adjustment_simulator",
       "notebook_task": {
-        "notebook_path": "/Workspace/ecommerce_etl/notebooks/04_order_items_adjustment_simulator",
+        "notebook_path": "/Workspace/Users/brady120915@gmail.com/databricks_ecommerce_etl_v2/notebooks/04_order_items_adjustment_simulator",
         "base_parameters": {
           "catalog": "{{job.parameters.catalog}}",
           "cdc_landing_order_items_path": "{{job.parameters.cdc_landing_order_items_path}}",
@@ -97,7 +97,7 @@
       "task_key": "order_items_adjustment_apply",
       "depends_on": [{ "task_key": "order_items_adjustment_simulator" }],
       "notebook_task": {
-        "notebook_path": "/Workspace/ecommerce_etl/notebooks/05_order_items_adjustment_apply",
+        "notebook_path": "/Workspace/Users/brady120915@gmail.com/databricks_ecommerce_etl_v2/notebooks/05_order_items_adjustment_apply",
         "base_parameters": {
           "catalog": "{{job.parameters.catalog}}",
           "cdc_landing_order_items_path": "{{job.parameters.cdc_landing_order_items_path}}",
@@ -111,7 +111,7 @@
     {
       "environment_key": "serverless_env",
       "spec": {
-        "client": "1"
+        "client": "3"
       }
     }
   ],

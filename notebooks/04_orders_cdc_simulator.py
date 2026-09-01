@@ -10,14 +10,13 @@
 # MAGIC 完整歷史版本，用來支援 SLA 分析、漏斗分析、出貨延遲診斷。
 
 # COMMAND ----------
-
 dbutils.widgets.text("catalog", "ecommerce_demo", "Unity Catalog Catalog 名稱")
-dbutils.widgets.text("cdc_landing_path", "/Volumes/ecommerce_demo/raw/cdc_landing/orders", "CDC 事件落地路徑")
-dbutils.widgets.text("num_change_events", "300", "本次模擬要產生的 change event 數量")
+dbutils.widgets.text("cdc_landing_orders_path", "/Volumes/ecommerce_demo/raw/cdc_landing/orders", "CDC Orders 事件落地路徑")
+dbutils.widgets.text("num_change_orders_events", "300", "本次模擬要產生的 change event 數量")
 
 catalog = dbutils.widgets.get("catalog")
-cdc_landing_path = dbutils.widgets.get("cdc_landing_path")
-num_change_events = int(dbutils.widgets.get("num_change_events"))
+cdc_landing_path = dbutils.widgets.get("cdc_landing_orders_path")
+num_change_events = int(dbutils.widgets.get("num_change_orders_events"))
 
 dbutils.fs.mkdirs(cdc_landing_path)
 
