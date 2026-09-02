@@ -25,7 +25,6 @@ dbutils.widgets.text("landing_volume_path", "/Volumes/ecommerce_demo/raw/landing
 dbutils.widgets.text("num_customers", "5000", "顧客數量")
 dbutils.widgets.text("num_products", "500", "商品數量")
 dbutils.widgets.text("num_orders", "20000", "訂單數量")
-dbutils.widgets.text("num_web_events", "80000", "網站事件數量")
 dbutils.widgets.text("inject_dirty_data", "true", "是否故意注入髒資料(用來示範 Silver 層清洗)")
 
 catalog = dbutils.widgets.get("catalog")
@@ -33,7 +32,6 @@ landing_path = dbutils.widgets.get("landing_volume_path")
 num_customers = int(dbutils.widgets.get("num_customers"))
 num_products = int(dbutils.widgets.get("num_products"))
 num_orders = int(dbutils.widgets.get("num_orders"))
-num_web_events = int(dbutils.widgets.get("num_web_events"))
 inject_dirty_data = dbutils.widgets.get("inject_dirty_data").lower() == "true"
 
 print(f"catalog={catalog}, landing_path={landing_path}")
@@ -60,7 +58,7 @@ dbutils.fs.mkdirs(f"{landing_path}/customers")
 dbutils.fs.mkdirs(f"{landing_path}/products")
 dbutils.fs.mkdirs(f"{landing_path}/orders")
 dbutils.fs.mkdirs(f"{landing_path}/order_items")
-dbutils.fs.mkdirs(f"{landing_path}/web_events")
+
 
 # COMMAND ----------
 
@@ -188,23 +186,6 @@ def gen_orders_and_items(n_orders, customers_df, products_df):
 
     return pd.DataFrame(order_rows), pd.DataFrame(item_rows)
 
-# ---------- web_events ----------
-def gen_web_events(n, customers_df):
-    rows = []
-    customer_ids = customers_df["customer_id"].tolist()
-    event_types = ["page_view", "add_to_cart", "search", "checkout_start", "checkout_complete"]
-    for i in range(n):
-        rows.append({
-            "event_id": str(uuid.uuid4()),
-            "customer_id": random.choice(customer_ids) if random.random() > 0.1 else None,  # 訪客
-            "event_type": random.choices(event_types, weights=[0.55, 0.2, 0.15, 0.06, 0.04])[0],
-            "channel": random.choice(CHANNELS),
-            "device_type": random.choice(DEVICE_TYPES),
-            "event_ts": random_date(START_DATE, END_DATE).strftime("%Y-%m-%d %H:%M:%S"),
-        })
-    return pd.DataFrame(rows)
-
-# COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 產生資料並寫入 Landing Zone
@@ -221,7 +202,6 @@ datasets = {
     "products": products_pdf,
     "orders": orders_pdf,
     "order_items": order_items_pdf,
-    "web_events": web_events_pdf,
 }
 
 for name, pdf in datasets.items():
