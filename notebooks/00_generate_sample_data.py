@@ -1,38 +1,40 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 00 - 產生模擬電商原始資料
-# MAGIC 這個 notebook 會產生五張模擬電商資料表，並以 CSV/JSON 落地到一個「landing zone」路徑，
-# MAGIC 模擬真實情境中資料從上游系統（訂單系統、CRM、網站埋點）送進來的樣子。
+# MAGIC # 00 - Generate Simulated E-commerce Raw Data
+# MAGIC This notebook generates four simulated e-commerce tables and lands them as CSV in a "landing zone" path,
+# MAGIC mimicking how data arrives from upstream systems (order system, CRM) in a real-world scenario.
 # MAGIC
-# MAGIC 產生的表：
-# MAGIC - `customers`：顧客主檔
-# MAGIC - `products`：商品主檔
-# MAGIC - `orders`：訂單主檔
-# MAGIC - `order_items`：訂單明細
+# MAGIC Tables generated:
+# MAGIC - `customers`: customer master
+# MAGIC - `products`: product master
+# MAGIC - `orders`: order header
+# MAGIC - `order_items`: order line items
 # MAGIC
-# MAGIC 之後的 pipeline（01/02/03）都會從這個 landing zone 開始讀取，就像串接真實來源系統一樣。
+# MAGIC The downstream pipeline (01/02/03) all starts reading from this landing zone, just as if it were connected to real source systems.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 參數設定
+# MAGIC ## Parameters
 
 # COMMAND ----------
 
-dbutils.widgets.text("catalog", "ecommerce_demo", "Unity Catalog Catalog 名稱")
-dbutils.widgets.text("landing_volume_path", "/Volumes/ecommerce_demo/raw/landing", "Landing Zone 路徑")
-dbutils.widgets.text("num_customers", "5000", "顧客數量")
-dbutils.widgets.text("num_products", "500", "商品數量")
-dbutils.widgets.text("num_orders", "20000", "訂單數量")
-dbutils.widgets.text("inject_dirty_data", "true", "是否故意注入髒資料(用來示範 Silver 層清洗)")
+dbutils.widgets.text("catalog", "ecommerce_demo", "Unity Catalog catalog name")
+dbutils.widgets.text("landing_volume_path", "", "Landing zone path (leave empty to derive from catalog)")
+dbutils.widgets.text("num_customers", "5000", "Number of customers")
+dbutils.widgets.text("num_products", "500", "Number of products")
+dbutils.widgets.text("num_orders", "20000", "Number of orders")
+dbutils.widgets.text("inject_dirty_data", "true", "Intentionally inject dirty data (to demonstrate Silver-layer cleaning)")
+dbutils.widgets.text("force_regenerate", "false", "Generate even if the landing zone already has data")
+
 
 catalog = dbutils.widgets.get("catalog")
-landing_path = dbutils.widgets.get("landing_volume_path")
+landing_path = dbutils.widgets.get("landing_volume_path") or f"/Volumes/{catalog}/raw/landing"
 num_customers = int(dbutils.widgets.get("num_customers"))
 num_products = int(dbutils.widgets.get("num_products"))
 num_orders = int(dbutils.widgets.get("num_orders"))
 inject_dirty_data = dbutils.widgets.get("inject_dirty_data").lower() == "true"
-
+force_regenerate = dbutils.widgets.get("force_regenerate").lower() == "true"
 print(f"catalog={catalog}, landing_path={landing_path}")
 print(f"customers={num_customers}, products={num_products}, orders={num_orders}")
 print(f"inject_dirty_data={inject_dirty_data}")
@@ -40,7 +42,7 @@ print(f"inject_dirty_data={inject_dirty_data}")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 建立 Catalog / Schema / Volume（若不存在）
+# MAGIC ## Create Catalog / Schemas / Volumes (if they don't exist)
 
 # COMMAND ----------
 
@@ -58,13 +60,42 @@ dbutils.fs.mkdirs(f"{landing_path}/products")
 dbutils.fs.mkdirs(f"{landing_path}/orders")
 dbutils.fs.mkdirs(f"{landing_path}/order_items")
 
+# ---------------------------------------------------------------------------
+# Guard against duplicate writes
+#
+# Why: every run of this notebook writes a NEW timestamped batch folder. Running it
+# twice would therefore stack two batches in the landing zone. Because the random
+# seed is fixed, both batches contain the same IDs, and Auto Loader would ingest
+# both, producing large-scale duplicates downstream.
+#
+# How: if any batch folder already exists, stop BEFORE generating anything, unless
+# force_regenerate=true. Only the customers folder is checked, as a proxy for the
+# whole landing zone.
+#
+# Order matters: this check must run AFTER the mkdirs above. On a fresh environment
+# the folder then exists but is empty, so the check passes. Before the mkdirs,
+# dbutils.fs.ls would fail because the path does not exist yet.
+#
+# To reset properly: drop the catalog (DROP CATALOG ... CASCADE) and re-run Job A,
+# rather than setting force_regenerate=true.
+#
+# Limitation: this only protects the landing zone. It does not protect against the
+# _cdc_lsn schema-evolution problem described in the README (Section 7, item 4).
+# ---------------------------------------------------------------------------
+existing_batches = [f.name for f in dbutils.fs.ls(f"{landing_path}/customers")]
+if existing_batches and not force_regenerate:
+    raise RuntimeError(
+        f"Landing zone already contains data ({existing_batches[:3]} ...). "
+        "Re-running 00 would stack duplicate batches. "
+        "To reset, drop the catalog with DROP CASCADE, or set force_regenerate=true."
+    )
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 資料產生邏輯
-# MAGIC 用 `pandas` + `numpy` 在 driver 端產生資料（適合示範用的資料量）。
-# MAGIC 若資料量要拉大到千萬筆等級，建議改成用 Spark 的 `range()` + UDF 分散式產生。
+# MAGIC ## Data Generation Logic
+# MAGIC Uses `pandas` + `numpy` to generate data on the driver (suitable for demo-sized data).
+# MAGIC If you need to scale up to tens of millions of rows, consider switching to distributed generation with Spark's `range()` + UDFs.
 
 # COMMAND ----------
 
@@ -98,7 +129,7 @@ def gen_customers(n):
     for i in range(n):
         signup_date = random_date(START_DATE, END_DATE)
         email = f"user{i}@example.com"
-        # 故意注入一些髒資料：空 email、重複 id、大小寫不一致
+        # Intentionally inject some dirty data: empty emails, duplicate ids, inconsistent casing
         if inject_dirty_data and random.random() < 0.01:
             email = None
         if inject_dirty_data and random.random() < 0.02:
@@ -115,7 +146,7 @@ def gen_customers(n):
         })
     df = pd.DataFrame(rows)
     if inject_dirty_data:
-        # 注入幾筆重複顧客 (模擬上游系統重送)
+        # Inject a few duplicate customers (simulating the upstream system re-sending records)
         dup = df.sample(frac=0.01, random_state=1)
         df = pd.concat([df, dup], ignore_index=True)
     return df
@@ -156,7 +187,7 @@ def gen_orders_and_items(n_orders, customers_df, products_df):
         for item_idx, prod in enumerate(chosen_products):
             qty = random.randint(1, 3)
             unit_price = prod["list_price"]
-            # 偶爾有折扣
+            # Occasionally apply a discount
             discount_pct = random.choice([0, 0, 0, 0.1, 0.2])
             line_total = round(qty * unit_price * (1 - discount_pct), 2)
             order_total += line_total
@@ -172,7 +203,8 @@ def gen_orders_and_items(n_orders, customers_df, products_df):
 
         order_rows.append({
             "order_id": order_id,
-            # 故意讓極少數訂單的 customer_id 對不到 customers 表 (示範 FK 髒資料)
+            # Intentionally make a very small number of orders have a customer_id that doesn't exist
+            # in the customers table (to demonstrate foreign-key dirty data)
             "customer_id": customer_id if not (inject_dirty_data and random.random() < 0.005)
                            else f"UNKNOWN_{uuid.uuid4().hex[:6]}",
             "order_date": order_date.strftime("%Y-%m-%d %H:%M:%S"),
@@ -186,7 +218,7 @@ def gen_orders_and_items(n_orders, customers_df, products_df):
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 產生資料並寫入 Landing Zone
+# MAGIC ## Generate Data and Write to the Landing Zone
 
 # COMMAND ----------
 
@@ -204,7 +236,8 @@ datasets = {
 for name, pdf in datasets.items():
     sdf = spark.createDataFrame(pdf)
     out_path = f"{landing_path}/{name}"
-    # 用 CSV 落地，模擬上游系統常見的交付格式；帶時間戳記檔名模擬每日批次送檔
+    # Land as CSV to mimic a file-based delivery from an upstream system;
+    # a timestamped batch folder name simulates daily batch file drops
     batch_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     (sdf.coalesce(1)
         .write.mode("overwrite")
@@ -215,6 +248,6 @@ for name, pdf in datasets.items():
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC 資料已經產生完成。接下來執行 `01_bronze_ingestion` 把這些原始檔案讀進 Bronze 層 Delta 表。
+# MAGIC Data generation is complete. Next, run `01_bronze_ingestion` to load these raw files into the Bronze-layer Delta tables.
 
 # COMMAND ----------

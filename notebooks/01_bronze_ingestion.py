@@ -1,21 +1,21 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 01 - Bronze 層：原始資料落地
-# MAGIC 用 Databricks **Auto Loader**（`cloudFiles`）持續監控 landing zone，把新到的檔案增量讀入 Delta 表。
-# MAGIC Bronze 層原則：**不做任何清洗或業務邏輯轉換**，只做：
-# MAGIC - 型別是 string 為主（先保留原樣，避免髒資料讓 ingestion 失敗）
-# MAGIC - 加上來源中繼資料：`_source_file`、`_ingest_ts`
-# MAGIC - Schema 演進交給 Auto Loader 自動處理
+# MAGIC # 01 - Bronze Layer: Landing Raw Data
+# MAGIC Uses Databricks **Auto Loader** (`cloudFiles`) to continuously monitor the landing zone and incrementally read newly arrived files into Delta tables.
+# MAGIC Bronze layer principle: **no cleaning or business-logic transformation**. It only does the following:
+# MAGIC - Types are mostly string (keep the data as-is, so dirty data doesn't cause ingestion to fail)
+# MAGIC - Adds source metadata: `_source_file`, `_ingest_ts`
+# MAGIC - Schema evolution is handled automatically by Auto Loader
 
 # COMMAND ----------
 
-dbutils.widgets.text("catalog", "ecommerce_demo", "Unity Catalog Catalog 名稱")
-dbutils.widgets.text("landing_volume_path", "/Volumes/ecommerce_demo/raw/landing", "Landing Zone 路徑")
-dbutils.widgets.text("checkpoint_path", "/Volumes/ecommerce_demo/raw/_checkpoints", "Auto Loader Checkpoint 路徑")
+dbutils.widgets.text("catalog", "ecommerce_demo", "Unity Catalog catalog name")
+dbutils.widgets.text("landing_volume_path", "", "Landing zone path (leave empty to derive from catalog)")
+dbutils.widgets.text("checkpoint_path", "", "Auto Loader checkpoint path (leave empty to derive from catalog)")
 
 catalog = dbutils.widgets.get("catalog")
-landing_path = dbutils.widgets.get("landing_volume_path")
-checkpoint_path = dbutils.widgets.get("checkpoint_path")
+landing_path = dbutils.widgets.get("landing_volume_path") or f"/Volumes/{catalog}/raw/landing"
+checkpoint_path = dbutils.widgets.get("checkpoint_path") or f"/Volumes/{catalog}/raw/_checkpoints"
 
 TABLES = ["customers", "products", "orders", "order_items"]
 
@@ -43,7 +43,7 @@ def ingest_to_bronze(table_name: str):
              .format("delta")
              .option("checkpointLocation", checkpoint_location)
              .outputMode("append")
-             .trigger(availableNow=True)  # 批次式微批處理：這次執行把所有新檔案處理完就停
+             .trigger(availableNow=True)  # Batch-style micro-batch processing: process all new files in this run, then stop
              .toTable(target_table))
 
     query.awaitTermination()
@@ -52,9 +52,9 @@ def ingest_to_bronze(table_name: str):
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 逐表執行 Auto Loader ingestion
-# MAGIC 使用 `trigger(availableNow=True)`：適合排程式批次 job（每次執行把新資料讀完就結束），
-# MAGIC 如果要做成真正的即時串流，把 trigger 拿掉即可，並讓 job 一直跑著。
+# MAGIC ## Run Auto Loader Ingestion Table by Table
+# MAGIC Uses `trigger(availableNow=True)`: suited to scheduled batch jobs (each run reads all new data and then finishes).
+
 
 # COMMAND ----------
 
@@ -64,7 +64,7 @@ for table in TABLES:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 檢查 Bronze 表
+# MAGIC ## Check the Bronze Tables
 
 # COMMAND ----------
 
