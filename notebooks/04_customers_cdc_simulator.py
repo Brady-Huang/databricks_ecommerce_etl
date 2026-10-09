@@ -81,44 +81,58 @@ def make_after_image(row=None, new_id=None):
 # COMMAND ----------
 
 events = []
-lsn_counter = int(time.time() * 1000)  # 模擬 Postgres 的 LSN(Log Sequence Number)，遞增代表事件發生順序
+# Qlik Replicate 的 changeSeq 通常是遞增的數字或十六進制字串，這裡用時間戳記模擬遞增數字
+change_seq_counter = int(time.time() * 1000) 
 
 for i in range(num_change_events):
-    lsn_counter += random.randint(1, 5)  # LSN 一定遞增，但事件送達下游的順序不保證(demo 下面會刻意打亂)
-    ts_ms = int(time.time() * 1000)
+    change_seq_counter += random.randint(1, 5)
+    # 生成 Qlik Replicate 標準的 ISO 8601 時間格式
+    timestamp_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     roll = random.random()
 
     if len(existing_customers) > 0 and roll < 0.55:
-        # ---- UPDATE ----
+        # ---- UPDATE (Qlik 標準) ----
         before_row = existing_customers.sample(1).iloc[0]
         after = make_after_image(row=before_row)
         event = {
-            "op": "u",
+            "header": {
+                "operation": "UPDATE",
+                "changeSeq": str(change_seq_counter).zfill(20), # 補滿 20 位數的字串
+                "timestamp": timestamp_iso,
+                "streamPosition": f"00012345.0000{i}a3.0001" # 模擬日誌實體位置
+            },
             "before": {
                 "customer_id": before_row["customer_id"],
                 "city": before_row["city"],
                 "is_member": bool(before_row["is_member"]),
             },
-            "after": after,
-            "source": {"table": "customers", "lsn": lsn_counter, "ts_ms": ts_ms},
+            "data": after, # 💡 注意：Debezium 的 after 在 Qlik 叫 data
         }
     elif len(existing_customers) > 0 and roll < 0.60:
-        # ---- DELETE ----
+        # ---- DELETE (Qlik 標準) ----
         row = existing_customers.sample(1).iloc[0]
         event = {
-            "op": "d",
+            "header": {
+                "operation": "DELETE",
+                "changeSeq": str(change_seq_counter).zfill(20),
+                "timestamp": timestamp_iso,
+                "streamPosition": f"00012345.0000{i}a3.0001"
+            },
             "before": {"customer_id": row["customer_id"]},
-            "after": None,
-            "source": {"table": "customers", "lsn": lsn_counter, "ts_ms": ts_ms},
+            "data": None,
         }
     else:
-        # ---- CREATE (新顧客在 Postgres 上註冊) ----
+        # ---- INSERT (在 Qlik 叫 INSERT) ----
         new_id = f"C{900000 + i}"
         event = {
-            "op": "c",
+            "header": {
+                "operation": "INSERT",
+                "changeSeq": str(change_seq_counter).zfill(20),
+                "timestamp": timestamp_iso,
+                "streamPosition": f"00012345.0000{i}a3.0001"
+            },
             "before": None,
-            "after": make_after_image(new_id=new_id),
-            "source": {"table": "customers", "lsn": lsn_counter, "ts_ms": ts_ms},
+            "data": make_after_image(new_id=new_id),
         }
 
     events.append(event)
@@ -135,7 +149,10 @@ df_out = spark.createDataFrame([(line,) for line in json_lines], ["value"])
 df_out.coalesce(1).write.mode("overwrite").text(out_path)
 
 print(f"[OK] 產生 {len(events)} 筆模擬 CDC 事件 -> {out_path}")
-print("op 分佈:", {op: sum(1 for e in events if e["op"] == op) for op in ["c", "u", "d"]})
+print("Operation 分佈:", {
+    op: sum(1 for e in events if e["header"]["operation"] == op) 
+    for op in ["INSERT", "UPDATE", "DELETE"]
+})
 
 # COMMAND ----------
 

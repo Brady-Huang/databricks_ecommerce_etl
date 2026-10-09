@@ -30,7 +30,7 @@ from delta.tables import DeltaTable
 
 from pyspark.sql.types import StructType, StructField, StringType, LongType, BooleanType
 
-# 手動定義 schema，避免 Spark 因為 before/after 欄位數量不一致而誤判
+# 1. 宣告 Qlik Replicate 內層資料與外層 Header Schema
 customer_schema = StructType([
     StructField("customer_id", StringType(), True),
     StructField("first_name", StringType(), True),
@@ -42,25 +42,26 @@ customer_schema = StructType([
     StructField("age", LongType(), True),
 ])
 
-cdc_event_schema = StructType([
-    StructField("op", StringType(), True),
-    StructField("before", customer_schema, True),
-    StructField("after", customer_schema, True),
-    StructField("source", StructType([
-        StructField("table", StringType(), True),
-        StructField("lsn", LongType(), True),
-        StructField("ts_ms", LongType(), True),
+# 對齊 Qlik Replicate 的 header, before, data 命名
+qlik_event_schema = StructType([
+    StructField("header", StructType([
+        StructField("operation", StringType(), True),
+        StructField("changeSeq", StringType(), True), # 💡 注意：Qlik 的 changeSeq 是字串型態
+        StructField("timestamp", StringType(), True),
+        StructField("streamPosition", StringType(), True),
     ]), True),
+    StructField("before", customer_schema, True),
+    StructField("data", customer_schema, True), # 💡 Debezium 的 after 在 Qlik 叫 data
 ])
 
+# 2. 建立 Bronze Delta 表欄位結構
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {catalog}.bronze.customers_cdc_log (
-    op STRING,
+    operation STRING,
+    changeSeq STRING,
+    timestamp STRING,
     before STRING,
-    after STRING,
-    source_table STRING,
-    lsn BIGINT,
-    ts_ms BIGINT,
+    data STRING,
     _source_file STRING,
     _ingest_ts TIMESTAMP
 ) USING DELTA
@@ -69,18 +70,17 @@ CREATE TABLE IF NOT EXISTS {catalog}.bronze.customers_cdc_log (
 raw_cdc = (spark.readStream
            .format("cloudFiles")
            .option("cloudFiles.format", "json")
-           .schema(cdc_event_schema)
+           .schema(qlik_event_schema)
            .option("recursiveFileLookup", "true")
            .load(cdc_landing_path))
 
 bronze_cdc = (raw_cdc
               .select(
-                  F.col("op"),
+                  F.col("header.operation").alias("operation"),
+                  F.col("header.changeSeq").alias("changeSeq"),
+                  F.col("header.timestamp").alias("timestamp"),
                   F.to_json(F.col("before")).alias("before"),
-                  F.to_json(F.col("after")).alias("after"),
-                  F.col("source.table").alias("source_table"),
-                  F.col("source.lsn").alias("lsn"),
-                  F.col("source.ts_ms").alias("ts_ms"),
+                  F.to_json(F.col("data")).alias("data"), # 轉成 JSON 存入 data 欄位
               )
               .withColumn("_source_file", F.col("_metadata.file_path"))
               .withColumn("_ingest_ts", F.current_timestamp()))
@@ -120,48 +120,47 @@ else:
 # COMMAND ----------
 
 def upsert_cdc_to_silver(micro_batch_df, batch_id):
-    # 如果這 15 分鐘內沒有任何新的 CDC 事件檔案，直接跳過不耗費計算資源
     if micro_batch_df.isEmpty():
         print("[SKIP] 本次 15 分鐘內沒有新的 CDC 事件需要套用")
         return
 
-    # 1. 批次內去重：在同一個 15 分鐘微批次內，針對同一個顧客按 lsn 與 ts_ms 降序排序
+    # 1. 批次內去重：從 data 或 before 中抓取 customer_id，並依據 changeSeq 字串排序
     w = Window.partitionBy(
-        F.coalesce(F.get_json_object("after", "$.customer_id"), F.get_json_object("before", "$.customer_id"))
-    ).orderBy(F.col("lsn").desc(), F.col("ts_ms").desc())
+        F.coalesce(F.get_json_object("data", "$.customer_id"), F.get_json_object("before", "$.customer_id"))
+    ).orderBy(F.col("changeSeq").desc()) # 💡 zfill(20) 確保了字串排序完全合法
 
     dedup_events = (
         micro_batch_df
         .withColumn("customer_id", F.coalesce(
-            F.get_json_object("after", "$.customer_id"),
+            F.get_json_object("data", "$.customer_id"),
             F.get_json_object("before", "$.customer_id")))
         .withColumn("_rn", F.row_number().over(w))
         .filter("_rn = 1")
         .select(
-            "customer_id", "op", "lsn",
-            F.get_json_object("after", "$.first_name").alias("first_name"),
-            F.get_json_object("after", "$.last_name").alias("last_name"),
-            F.get_json_object("after", "$.email").alias("email"),
-            F.get_json_object("after", "$.city").alias("city"),
-            F.to_date(F.get_json_object("after", "$.signup_date")).alias("signup_date"),
-            (F.get_json_object("after", "$.is_member") == "true").alias("is_member"),
-            F.get_json_object("after", "$.age").cast("int").alias("age"),
+            "customer_id", "operation", 
+            F.col("changeSeq").cast("bigint").alias("lsn"), # 💡 轉成 bigint 以便跟 silver 的 _cdc_lsn 進行大小比較
+            F.get_json_object("data", "$.first_name").alias("first_name"),
+            F.get_json_object("data", "$.last_name").alias("last_name"),
+            F.get_json_object("data", "$.email").alias("email"),
+            F.get_json_object("data", "$.city").alias("city"),
+            F.to_date(F.get_json_object("data", "$.signup_date")).alias("signup_date"),
+            (F.get_json_object("data", "$.is_member") == "true").alias("is_member"),
+            F.get_json_object("data", "$.age").cast("int").alias("age"),
         )
     )
 
-    # 追蹤本次批次去重後的事件筆數
     pending_count = dedup_events.count()
     print(f"待套用事件數（去重後）: {pending_count}")
 
-    # 2. 執行 MERGE INTO
+    # 2. 執行 MERGE INTO（比對大寫的 'DELETE' / 'INSERT' / 'UPDATE'）
     if pending_count > 0:
         target_table = DeltaTable.forName(spark, f"{catalog}.silver.customers")
         
         (target_table.alias("t")
          .merge(dedup_events.alias("s"), "t.customer_id = s.customer_id")
-         .whenMatchedDelete(condition="s.op = 'd' AND s.lsn > coalesce(t._cdc_lsn, -1)")
+         .whenMatchedDelete(condition="s.operation = 'DELETE' AND s.lsn > coalesce(t._cdc_lsn, -1)")
          .whenMatchedUpdate(
-             condition="s.op IN ('c','u') AND s.lsn > coalesce(t._cdc_lsn, -1)",
+             condition="s.operation IN ('INSERT', 'UPDATE') AND s.lsn > coalesce(t._cdc_lsn, -1)",
              set={
                  "first_name": "s.first_name",
                  "last_name": "s.last_name",
@@ -174,7 +173,7 @@ def upsert_cdc_to_silver(micro_batch_df, batch_id):
                  "_updated_ts": "current_timestamp()",
              })
          .whenNotMatchedInsert(
-             condition="s.op != 'd'",
+             condition="s.operation != 'DELETE'",
              values={
                  "customer_id": "s.customer_id",
                  "first_name": "s.first_name",
@@ -188,7 +187,7 @@ def upsert_cdc_to_silver(micro_batch_df, batch_id):
                  "_updated_ts": "current_timestamp()",
              })
          .execute())
-        print(f"[OK] 已套用 {pending_count} 筆 CDC 變更到 silver.customers")
+        print(f"[OK] 已套用 {pending_count} 筆 Qlik CDC 變更到 silver.customers")
 
 # 3. 啟動增量管道：利用 Checkpoint 追蹤新檔案，availableNow 確保讀完這 15 分鐘資料就關機
 silver_query = (spark.readStream
