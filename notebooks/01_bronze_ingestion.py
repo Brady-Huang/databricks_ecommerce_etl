@@ -17,7 +17,7 @@ catalog = dbutils.widgets.get("catalog")
 landing_path = dbutils.widgets.get("landing_volume_path")
 checkpoint_path = dbutils.widgets.get("checkpoint_path")
 
-TABLES = ["customers", "products", "orders", "order_items", "web_events"]
+TABLES = ["customers", "products", "orders", "order_items"]
 
 # COMMAND ----------
 

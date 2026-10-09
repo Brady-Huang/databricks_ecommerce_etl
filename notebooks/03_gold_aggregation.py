@@ -5,7 +5,6 @@
 # MAGIC - `daily_sales_summary`：每日營收、訂單數、客單價
 # MAGIC - `customer_ltv`：顧客終身價值、下單次數、最近下單日
 # MAGIC - `product_performance`：商品銷售額、銷量、毛利
-# MAGIC - `channel_funnel`：各流量來源的瀏覽 -> 加入購物車 -> 結帳完成 轉換漏斗
 
 # COMMAND ----------
 
@@ -18,7 +17,7 @@ orders = spark.table(f"{catalog}.silver.orders").filter("status = 'completed' AN
 order_items = spark.table(f"{catalog}.silver.order_items")
 customers = spark.table(f"{catalog}.silver.customers")
 products = spark.table(f"{catalog}.silver.products").filter("is_current = true")
-web_events = spark.table(f"{catalog}.silver.web_events")
+
 
 # COMMAND ----------
 
@@ -110,34 +109,9 @@ product_performance = (
 product_performance.write.mode("overwrite").saveAsTable(f"{catalog}.gold.product_performance")
 print(f"[OK] gold.product_performance: {product_performance.count()} products")
 
-# COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Gold: channel_funnel
-# MAGIC 各流量來源在 `page_view -> add_to_cart -> checkout_start -> checkout_complete` 的轉換率。
 
-# COMMAND ----------
 
-funnel_counts = (
-    web_events
-    .groupBy("channel")
-    .pivot("event_type", ["page_view", "add_to_cart", "checkout_start", "checkout_complete"])
-    .count()
-    .fillna(0)
-)
-
-channel_funnel = (
-    funnel_counts
-    .withColumn("view_to_cart_rate",
-                F.round(F.col("add_to_cart") / F.col("page_view") * 100, 2))
-    .withColumn("cart_to_checkout_rate",
-                F.round(F.col("checkout_start") / F.col("add_to_cart") * 100, 2))
-    .withColumn("checkout_completion_rate",
-                F.round(F.col("checkout_complete") / F.col("checkout_start") * 100, 2))
-)
-
-channel_funnel.write.mode("overwrite").saveAsTable(f"{catalog}.gold.channel_funnel")
-print(f"[OK] gold.channel_funnel: {channel_funnel.count()} channels")
 
 # COMMAND ----------
 
@@ -156,6 +130,3 @@ display(spark.table(f"{catalog}.gold.customer_ltv").orderBy(F.desc("lifetime_val
 
 display(spark.table(f"{catalog}.gold.product_performance").limit(10))
 
-# COMMAND ----------
-
-display(spark.table(f"{catalog}.gold.channel_funnel"))

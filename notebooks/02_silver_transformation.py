@@ -237,40 +237,7 @@ spark.createDataFrame(
 
 print(f"[OK] Silver order_items merged. Amount mismatch count: {amount_mismatch}")
 
-# COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Silver: web_events
-
-# COMMAND ----------
-
-spark.sql(f"""
-CREATE TABLE IF NOT EXISTS {catalog}.silver.web_events (
-    event_id STRING NOT NULL,
-    customer_id STRING,
-    event_type STRING,
-    channel STRING,
-    device_type STRING,
-    event_ts TIMESTAMP,
-    _updated_ts TIMESTAMP
-) USING DELTA
-""")
-
-silver_events_df = (
-    spark.table(f"{catalog}.bronze.web_events")
-    .dropDuplicates(["event_id"])
-    .withColumn("event_ts", F.to_timestamp("event_ts"))
-    .withColumn("_updated_ts", F.current_timestamp())
-    .select("event_id", "customer_id", "event_type", "channel", "device_type", "event_ts", "_updated_ts")
-)
-
-(DeltaTable.forName(spark, f"{catalog}.silver.web_events").alias("t")
- .merge(silver_events_df.alias("s"), "t.event_id = s.event_id")
- .whenMatchedUpdateAll()
- .whenNotMatchedInsertAll()
- .execute())
-
-print(f"[OK] Silver web_events merged: {silver_events_df.count()} rows")
 
 # COMMAND ----------
 

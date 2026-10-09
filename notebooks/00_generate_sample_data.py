@@ -9,7 +9,6 @@
 # MAGIC - `products`：商品主檔
 # MAGIC - `orders`：訂單主檔
 # MAGIC - `order_items`：訂單明細
-# MAGIC - `web_events`：網站瀏覽/加入購物車事件（點擊流）
 # MAGIC
 # MAGIC 之後的 pipeline（01/02/03）都會從這個 landing zone 開始讀取，就像串接真實來源系統一樣。
 
@@ -35,7 +34,7 @@ num_orders = int(dbutils.widgets.get("num_orders"))
 inject_dirty_data = dbutils.widgets.get("inject_dirty_data").lower() == "true"
 
 print(f"catalog={catalog}, landing_path={landing_path}")
-print(f"customers={num_customers}, products={num_products}, orders={num_orders}, web_events={num_web_events}")
+print(f"customers={num_customers}, products={num_products}, orders={num_orders}")
 print(f"inject_dirty_data={inject_dirty_data}")
 
 # COMMAND ----------
@@ -72,7 +71,6 @@ dbutils.fs.mkdirs(f"{landing_path}/order_items")
 import numpy as np
 import pandas as pd
 import random
-import string
 import uuid
 from datetime import datetime, timedelta
 
@@ -83,8 +81,7 @@ CATEGORIES = ["Electronics", "Home & Kitchen", "Fashion", "Beauty", "Sports",
               "Books", "Toys", "Grocery", "Pet Supplies", "Office"]
 CITIES = ["Taipei", "New Taipei", "Taichung", "Tainan", "Kaohsiung",
           "Hsinchu", "Keelung", "Chiayi", "Yilan", "Hualien"]
-CHANNELS = ["organic_search", "paid_ads", "social_media", "email", "direct", "referral"]
-DEVICE_TYPES = ["mobile", "desktop", "tablet"]
+
 PAYMENT_METHODS = ["credit_card", "line_pay", "apple_pay", "bank_transfer", "cod"]
 ORDER_STATUSES = ["completed", "completed", "completed", "cancelled", "refunded", "pending"]
 
@@ -186,6 +183,7 @@ def gen_orders_and_items(n_orders, customers_df, products_df):
 
     return pd.DataFrame(order_rows), pd.DataFrame(item_rows)
 
+# COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 產生資料並寫入 Landing Zone
@@ -195,7 +193,6 @@ def gen_orders_and_items(n_orders, customers_df, products_df):
 customers_pdf = gen_customers(num_customers)
 products_pdf = gen_products(num_products)
 orders_pdf, order_items_pdf = gen_orders_and_items(num_orders, customers_pdf, products_pdf)
-web_events_pdf = gen_web_events(num_web_events, customers_pdf)
 
 datasets = {
     "customers": customers_pdf,
@@ -219,3 +216,5 @@ for name, pdf in datasets.items():
 
 # MAGIC %md
 # MAGIC 資料已經產生完成。接下來執行 `01_bronze_ingestion` 把這些原始檔案讀進 Bronze 層 Delta 表。
+
+# COMMAND ----------

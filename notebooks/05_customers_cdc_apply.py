@@ -10,11 +10,11 @@
 # COMMAND ----------
 
 dbutils.widgets.text("catalog", "ecommerce_demo", "Unity Catalog Catalog 名稱")
-dbutils.widgets.text("cdc_landing_path", "/Volumes/ecommerce_demo/raw/cdc_landing/customers", "CDC 事件落地路徑")
+dbutils.widgets.text("cdc_landing_customers_path", "/Volumes/ecommerce_demo/raw/cdc_landing/customers", "CDC 事件落地路徑")
 dbutils.widgets.text("checkpoint_path", "/Volumes/ecommerce_demo/raw/_checkpoints/cdc_customers", "Checkpoint 路徑")
 
 catalog = dbutils.widgets.get("catalog")
-cdc_landing_path = dbutils.widgets.get("cdc_landing_path")
+cdc_landing_path = dbutils.widgets.get("cdc_landing_customers_path")
 checkpoint_path = dbutils.widgets.get("checkpoint_path")
 
 from pyspark.sql import functions as F
@@ -159,9 +159,9 @@ def upsert_cdc_to_silver(micro_batch_df, batch_id):
         
         (target_table.alias("t")
          .merge(dedup_events.alias("s"), "t.customer_id = s.customer_id")
-         .whenMatchedDelete(condition="s.op = 'd' AND s.lsn > t._cdc_lsn")
+         .whenMatchedDelete(condition="s.op = 'd' AND s.lsn > coalesce(t._cdc_lsn, -1)")
          .whenMatchedUpdate(
-             condition="s.op IN ('c','u') AND s.lsn > t._cdc_lsn",
+             condition="s.op IN ('c','u') AND s.lsn > coalesce(t._cdc_lsn, -1)",
              set={
                  "first_name": "s.first_name",
                  "last_name": "s.last_name",
